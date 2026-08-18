@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.local
+logs/
+*.log
+.DS_Store
+start_service.sh
+send_*_notice.js

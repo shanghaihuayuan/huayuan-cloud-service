@@ -1,0 +1,37 @@
+render.yaml
+services:
+  - type: web
+    name: huayuan-cloud-service
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: SMTP_HOST
+        value: smtp.qiye.163.com
+      - key: SMTP_PORT
+        value: 465
+      - key: SMTP_USER
+        value: ljy@shhy66.com
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: 华缘物流智能体
+      - key: IMAP_HOST
+        value: imap.qiye.163.com
+      - key: IMAP_PORT
+        value: 993
+      - key: IMAP_USER
+        value: ljy@shhy66.com
+      - key: IMAP_PASS
+        sync: false
+      - key: REPORT_TO
+        value: xuqiang@qtkj-tech.com
+      - key: REPORT_CC
+        value: ljy@shhy66.com
+      - key: ALERT_TO
+        value: ljy@shhy66.com
+      - key: TZ
+        value: Asia/Shanghai
