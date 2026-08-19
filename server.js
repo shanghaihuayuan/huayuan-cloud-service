@@ -9,6 +9,19 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+/* CORS: 允许 CloudStudio 域名和本地访问调用反馈API */
+app.use(function(req, res, next) {
+  var origin = req.headers.origin || '';
+  var allowed = ['https://68a512f8ff83441ea80e2043d97c5348.bj2.agentos-app.net', 'http://localhost:3000', 'http://127.0.0.1:3000'];
+  if (allowed.indexOf(origin) >= 0 || origin.indexOf('.agentos-app.net') >= 0) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
 const PORT = process.env.PORT || 3000;
 const TZ = process.env.TZ || 'Asia/Shanghai';
 
@@ -52,7 +65,7 @@ async function sendDailyReport() {
     `今日系统测试日报 ${dateStr}（${weekday}）`,
     '',
     '## 系统状态',
-    `- 版本：V3.9.1.1`,
+    `- 版本：V3.9.3`,
     `- 线上：https://68a512f8ff83441ea80e2043d97c5348.bj2.agentos-app.net/`,
     `- 账号：106个`,
     `- 本邮件由云端服务自动发送（不依赖本机）`,
@@ -152,6 +165,59 @@ app.post('/trigger/inbox', async (req, res) => {
   logTask('manual', 'info', '手动触发邮箱检查');
   const result = await runInboxCheck();
   res.json(result);
+});
+
+// Feedback endpoint: receives feedback from frontend, sends email, returns real success/failure
+app.post('/api/feedback', async (req, res) => {
+  var d = req.body || {};
+  if (!d.dept && !d.desc) {
+    return res.status(400).json({ success: false, error: '缺少必填参数: dept, desc' });
+  }
+  var catNames = { bug: 'Bug报告', suggestion: '改进建议', question: '疑问咨询', other: '其他' };
+  var catLabel = catNames[d.cat] || d.cat || '未分类';
+  var subject = d.subject || ('【' + (d.dept || '未知部门') + ' - 反馈】' + catLabel);
+
+  var body = [
+    '部门：' + (d.dept || '未知'),
+    '负责人：' + (d.owner || '未知'),
+    '反馈类型：' + catLabel,
+    '优先级：' + (d.priority || '未设置'),
+    '功能模块：' + (d.feature || '未指定'),
+    '',
+    '问题描述：',
+    d.desc || '（无描述）',
+    '',
+    '期望行为：',
+    d.expected || '（无）',
+    '',
+    '测试人邮箱：' + (d.email || '未提供'),
+    '模块版本：' + (d.version || '未知'),
+    '提交时间：' + (d.time || new Date().toLocaleString('zh-CN', { timeZone: TZ })),
+    '',
+    '—— 本邮件由华缘物流云端服务 /api/feedback 接口自动发送',
+    '—— 反馈来源：测试界面反馈面板'
+  ].join('\n');
+
+  var feedbackTo = 'ftzi9285@agent.qq.com';
+  var feedbackCC = 'ljy@shhy66.com';
+  if (d.email && d.email.indexOf('@') > 0) {
+    feedbackCC = feedbackCC + ', ' + d.email;
+  }
+
+  try {
+    var info = await transporter.sendMail({
+      from: { name: process.env.SMTP_FROM_NAME || '华缘物流智能体', address: process.env.SMTP_USER || 'ljy@shhy66.com' },
+      to: feedbackTo,
+      cc: feedbackCC,
+      subject: String(subject).slice(0, 998),
+      text: body
+    });
+    logTask('feedback', 'success', 'dept=' + (d.dept || '?') + ' cat=' + catLabel + ' to=' + feedbackTo);
+    res.json({ success: true, messageId: info.messageId, message: '反馈已通过云端服务发送邮件' });
+  } catch (err) {
+    logTask('feedback', 'error', err.message);
+    res.status(500).json({ success: false, error: err.message, message: '邮件发送失败：' + err.message });
+  }
 });
 
 // Generic send: POST {to,cc?,subject,body}
