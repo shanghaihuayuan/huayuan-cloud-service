@@ -74,7 +74,7 @@ async function checkInbox(config) {
         ].join('\n');
 
         await transporter.sendMail({
-          from: `"华缘物流云端服务" <${process.env.SMTP_USER}>`,
+          from: { name: '华缘物流云端服务', address: process.env.SMTP_USER || 'ljy@shhy66.com' },
           to: alertTo,
           subject: `【新邮件提醒】${recentHumanUnread.length}封未读邮件需要查看`,
           text: body
