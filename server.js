@@ -28,6 +28,12 @@ const TZ = process.env.TZ || 'Asia/Shanghai';
 const startTime = new Date();
 const taskLog = [];
 
+/* 内存存储登录记录（服务重启后丢失，测试阶段够用；
+ * 正式版可迁移到数据库。最多保留 2000 条，防止内存溢出。）
+ * 用于 /api/login-logs/query 接口给 login_records.html 页面拉取全局数据。 */
+const loginLogsStore = [];
+const LOGIN_LOGS_MAX = 2000;
+
 function logTask(type, status, detail) {
   const entry = {
     time: new Date().toLocaleString('zh-CN', { timeZone: TZ }),
@@ -257,11 +263,48 @@ app.post('/api/login-logs', async (req, res) => {
       text: body
     });
     logTask('login-logs', 'success', 'count=' + records.length + ' visitor=' + (d.visitorId || '?'));
-    res.json({ success: true, messageId: info.messageId, message: '登录记录已上报云端' });
+    /* 存入内存供 /api/login-logs/query 查询 */
+    records.forEach(function (r) {
+      loginLogsStore.push({
+        time: r.time || new Date().toLocaleString('zh-CN', { timeZone: TZ }),
+        action: r.action || '',
+        u: r.u || '',
+        n: r.n || '',
+        lvl: r.lvl || '',
+        dept: r.dept || '',
+        base: r.base || '',
+        reason: r.reason || '',
+        duration: r.duration || '',
+        page: r.page || '',
+        vid: r.vid || '',
+        reportedBy: d.visitorId || ''
+      });
+    });
+    if (loginLogsStore.length > LOGIN_LOGS_MAX) {
+      loginLogsStore.splice(0, loginLogsStore.length - LOGIN_LOGS_MAX);
+    }
+    res.json({ success: true, messageId: info.messageId, message: '登录记录已上报云端', stored: records.length });
   } catch (err) {
     logTask('login-logs', 'error', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// Login logs query: GET /api/login-logs/query?days=7&limit=500
+app.get('/api/login-logs/query', (req, res) => {
+  var days = parseInt(req.query.days, 10) || 30;
+  var limit = Math.min(parseInt(req.query.limit, 10) || 500, 2000);
+  var since = Date.now() - days * 24 * 60 * 60 * 1000;
+  var result = loginLogsStore.filter(function (r) {
+    var t = new Date(r.time.replace(/-/g, '/')).getTime() || 0;
+    return t >= since;
+  }).slice(-limit);
+  res.json({
+    success: true,
+    count: result.length,
+    totalStored: loginLogsStore.length,
+    records: result
+  });
 });
 
 // Generic send: POST {to,cc?,subject,body,html?}
