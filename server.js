@@ -74,7 +74,7 @@ async function sendDailyReport() {
 
   try {
     const info = await transporter.sendMail({
-      from: `"${process.env.SMTP_FROM_NAME || '华缘物流智能体'}" <${process.env.SMTP_USER}>`,
+      from: { name: process.env.SMTP_FROM_NAME || '华缘物流智能体', address: process.env.SMTP_USER || 'ljy@shhy66.com' },
       to: reportTo,
       cc: reportCC,
       subject: `华缘物流系统测试日报 ${dateStr}（${weekday}）- 云端自动发送`,
@@ -162,7 +162,7 @@ app.post('/send', async (req, res) => {
   }
   try {
     const info = await transporter.sendMail({
-      from: `"${process.env.SMTP_FROM_NAME || '华缘物流智能体'}" <${process.env.SMTP_USER}>`,
+      from: { name: process.env.SMTP_FROM_NAME || '华缘物流智能体', address: process.env.SMTP_USER || 'ljy@shhy66.com' },
       to: Array.isArray(to) ? to.join(',') : to,
       cc: cc ? (Array.isArray(cc) ? cc.join(',') : cc) : undefined,
       subject: String(subject).slice(0, 998),
@@ -188,7 +188,7 @@ app.listen(PORT, () => {
     setTimeout(() => {
       logTask('system', 'info', 'SMTP已配置，5秒后发送启动通知邮件');
       transporter.sendMail({
-        from: `"${process.env.SMTP_FROM_NAME || '华缘物流智能体'}" <${process.env.SMTP_USER}>`,
+        from: { name: process.env.SMTP_FROM_NAME || '华缘物流智能体', address: process.env.SMTP_USER || 'ljy@shhy66.com' },
         to: process.env.ALERT_TO || 'ljy@shhy66.com',
         subject: '【云端服务已启动】华缘物流邮件服务上线通知',
         text: `云端邮件服务已启动。\n\n服务地址：${process.env.RENDER_EXTERNAL_URL || 'http://localhost:' + PORT}\n启动时间：${new Date().toLocaleString('zh-CN', { timeZone: TZ })}\n\n定时任务：\n- 每天17:00 自动发送日报\n- 每30分钟(8:00-20:00) 检查邮箱\n\n此邮件由云端服务自动发送，不需要电脑开机。`
