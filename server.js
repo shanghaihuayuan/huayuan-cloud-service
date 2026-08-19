@@ -220,20 +220,70 @@ app.post('/api/feedback', async (req, res) => {
   }
 });
 
-// Generic send: POST {to,cc?,subject,body}
+// Login logs: POST {records: [...], visitorId?}
+app.post('/api/login-logs', async (req, res) => {
+  var d = req.body || {};
+  var records = Array.isArray(d.records) ? d.records : [];
+  if (records.length === 0) {
+    return res.status(400).json({ success: false, error: '缺少必填参数: records' });
+  }
+  var actionNames = { login: '登录成功', fail: '登录失败', logout: '退出登录' };
+  var rows = records.map(function (r, i) {
+    return (i + 1) + '. [' + (r.time || '?') + '] ' + (actionNames[r.action] || r.action) + ' | ' +
+      (r.u || '未知账号') + (r.n ? '(' + r.n + ')' : '') +
+      (r.lvl ? ' | ' + r.lvl : '') + (r.dept ? ' | ' + r.dept : '') + (r.base ? ' | ' + r.base : '') +
+      (r.reason ? ' | 原因:' + r.reason : '') + (r.duration ? ' | 在线' + r.duration + '分钟' : '') +
+      ' | 页面:' + (r.page || '?') + ' | 访客:' + (r.vid || '?');
+  }).join('\n');
+
+  var subject = '[登录记录] ' + records.length + '条 | ' + new Date().toLocaleString('zh-CN', { timeZone: TZ });
+  var body = [
+    '类型：账号登录记录（云端上报）',
+    '条数：' + records.length,
+    '上报访客ID：' + (d.visitorId || '未知'),
+    '',
+    '明细：',
+    rows,
+    '',
+    '—— 本邮件由华缘物流云端服务 /api/login-logs 接口自动发送'
+  ].join('\n');
+
+  try {
+    var info = await transporter.sendMail({
+      from: { name: process.env.SMTP_FROM_NAME || '华缘物流智能体', address: process.env.SMTP_USER || 'ljy@shhy66.com' },
+      to: 'ftzi9285@agent.qq.com',
+      cc: 'ljy@shhy66.com',
+      subject: String(subject).slice(0, 998),
+      text: body
+    });
+    logTask('login-logs', 'success', 'count=' + records.length + ' visitor=' + (d.visitorId || '?'));
+    res.json({ success: true, messageId: info.messageId, message: '登录记录已上报云端' });
+  } catch (err) {
+    logTask('login-logs', 'error', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Generic send: POST {to,cc?,subject,body,html?}
 app.post('/send', async (req, res) => {
-  const { to, cc, subject, body } = req.body || {};
-  if (!to || !subject || !body) {
-    return res.status(400).json({ error: '缺少必填参数: to, subject, body' });
+  const { to, cc, subject, body, html } = req.body || {};
+  if (!to || !subject || (!body && !html)) {
+    return res.status(400).json({ error: '缺少必填参数: to, subject, body 或 html' });
   }
   try {
-    const info = await transporter.sendMail({
+    var mailOptions = {
       from: { name: process.env.SMTP_FROM_NAME || '华缘物流智能体', address: process.env.SMTP_USER || 'ljy@shhy66.com' },
       to: Array.isArray(to) ? to.join(',') : to,
       cc: cc ? (Array.isArray(cc) ? cc.join(',') : cc) : undefined,
-      subject: String(subject).slice(0, 998),
-      text: String(body)
-    });
+      subject: String(subject).slice(0, 998)
+    };
+    if (html) {
+      mailOptions.html = String(html);
+    }
+    if (body) {
+      mailOptions.text = String(body);
+    }
+    const info = await transporter.sendMail(mailOptions);
     logTask('send', 'success', `to=${Array.isArray(to) ? to.join(',') : to} subj="${String(subject).slice(0, 30)}..."`);
     res.json({ success: true, messageId: info.messageId });
   } catch (err) {
