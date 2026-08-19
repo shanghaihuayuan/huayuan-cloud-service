@@ -32,7 +32,7 @@ const transporter = nodemailer.createTransport({
   port: parseInt(process.env.SMTP_PORT || '465'),
   secure: true,
   auth: {
-    user: process.env.SMTP_USER,
+    user: process.env.SMTP_USER || 'ljy@shhy66.com',
     pass: process.env.SMTP_PASS
   }
 });
@@ -93,7 +93,7 @@ async function runInboxCheck() {
     const result = await checkInbox({
       host: process.env.IMAP_HOST || 'imap.qiye.163.com',
       port: parseInt(process.env.IMAP_PORT || '993'),
-      user: process.env.IMAP_USER,
+      user: process.env.IMAP_USER || 'ljy@shhy66.com',
       pass: process.env.IMAP_PASS,
       alertTo: process.env.ALERT_TO || 'ljy@shhy66.com',
       transporter
