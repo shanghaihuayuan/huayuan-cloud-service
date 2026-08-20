@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cron = require('node-cron');
@@ -28,11 +29,34 @@ const TZ = process.env.TZ || 'Asia/Shanghai';
 const startTime = new Date();
 const taskLog = [];
 
-/* 内存存储登录记录（服务重启后丢失，测试阶段够用；
- * 正式版可迁移到数据库。最多保留 2000 条，防止内存溢出。）
+/* 内存存储登录记录（最多保留 2000 条，防止内存溢出。）
+ * 同时持久化到文件 login_logs_store.json，Render 重启后可恢复。
  * 用于 /api/login-logs/query 接口给 login_records.html 页面拉取全局数据。 */
 const loginLogsStore = [];
 const LOGIN_LOGS_MAX = 2000;
+const LOGIN_LOGS_FILE = path.join(__dirname, 'login_logs_store.json');
+
+function saveLoginLogs() {
+  try {
+    fs.writeFileSync(LOGIN_LOGS_FILE, JSON.stringify(loginLogsStore.slice(-LOGIN_LOGS_MAX)), 'utf8');
+  } catch (e) { console.error('saveLoginLogs failed:', e.message); }
+}
+
+function loadLoginLogs() {
+  try {
+    if (fs.existsSync(LOGIN_LOGS_FILE)) {
+      var data = JSON.parse(fs.readFileSync(LOGIN_LOGS_FILE, 'utf8'));
+      if (Array.isArray(data)) {
+        data.forEach(function (r) { loginLogsStore.push(r); });
+        if (loginLogsStore.length > LOGIN_LOGS_MAX) {
+          loginLogsStore.splice(0, loginLogsStore.length - LOGIN_LOGS_MAX);
+        }
+        logTask('system', 'info', '从文件恢复 ' + data.length + ' 条登录记录');
+      }
+    }
+  } catch (e) { logTask('system', 'warn', '恢复登录记录失败: ' + e.message); }
+}
+loadLoginLogs();
 
 function logTask(type, status, detail) {
   const entry = {
@@ -71,15 +95,15 @@ async function sendDailyReport() {
     `今日系统测试日报 ${dateStr}（${weekday}）`,
     '',
     '## 系统状态',
-    `- 版本：V3.9.3`,
+    `- 版本：V3.9.9`,
     `- 线上：https://68a512f8ff83441ea80e2043d97c5348.bj2.agentos-app.net/`,
     `- 账号：106个`,
     `- 本邮件由云端服务自动发送（不依赖本机）`,
     '',
     '## 今日待跟进',
-    '- HR字段方案A/B/C：种道阔 8/19前回复',
+    '- CloudStudio需同步最新代码（V3.9.6~V3.9.9，徐强负责）',
     '- 采购风控SOP：陆启祥 等反馈',
-    '- 数据持久化方案：大哥 等拍板',
+    '- 登录记录邮件刷屏已修复（V3.9.9服务端去重）',
     '',
     '## 说明',
     '本邮件为云端服务自动发送的简版日报。',
@@ -227,14 +251,36 @@ app.post('/api/feedback', async (req, res) => {
 });
 
 // Login logs: POST {records: [...], visitorId?}
+// V3.9.9：服务端去重（time+u+action），防止客户端 pagehide 重复上报刷屏邮件
 app.post('/api/login-logs', async (req, res) => {
   var d = req.body || {};
   var records = Array.isArray(d.records) ? d.records : [];
   if (records.length === 0) {
     return res.status(400).json({ success: false, error: '缺少必填参数: records' });
   }
+
+  /* 去重：基于 (time + u + action) 三元组，同批内+历史库都不重复 */
+  var existingKeys = new Set();
+  loginLogsStore.forEach(function (s) {
+    existingKeys.add((s.time || '') + '|' + (s.u || '') + '|' + (s.action || ''));
+  });
+  var newRecords = [];
+  var dupCount = 0;
+  records.forEach(function (r) {
+    var key = (r.time || '') + '|' + (r.u || '') + '|' + (r.action || '');
+    if (existingKeys.has(key)) { dupCount++; return; }
+    existingKeys.add(key); /* 防止同批内重复 */
+    newRecords.push(r);
+  });
+
+  if (newRecords.length === 0) {
+    /* 全部重复，返回 success（让客户端标记为已上报），但不发邮件 */
+    logTask('login-logs', 'info', 'all ' + records.length + ' records are duplicates, email skipped');
+    return res.json({ success: true, stored: 0, duplicates: dupCount, message: '记录已存在(去重)' });
+  }
+
   var actionNames = { login: '登录成功', fail: '登录失败', logout: '退出登录' };
-  var rows = records.map(function (r, i) {
+  var rows = newRecords.map(function (r, i) {
     return (i + 1) + '. [' + (r.time || '?') + '] ' + (actionNames[r.action] || r.action) + ' | ' +
       (r.u || '未知账号') + (r.n ? '(' + r.n + ')' : '') +
       (r.lvl ? ' | ' + r.lvl : '') + (r.dept ? ' | ' + r.dept : '') + (r.base ? ' | ' + r.base : '') +
@@ -242,10 +288,10 @@ app.post('/api/login-logs', async (req, res) => {
       ' | 页面:' + (r.page || '?') + ' | 访客:' + (r.vid || '?');
   }).join('\n');
 
-  var subject = '[登录记录] ' + records.length + '条 | ' + new Date().toLocaleString('zh-CN', { timeZone: TZ });
+  var subject = '[登录记录] ' + newRecords.length + '条 | ' + new Date().toLocaleString('zh-CN', { timeZone: TZ });
   var body = [
     '类型：账号登录记录（云端上报）',
-    '条数：' + records.length,
+    '条数：' + newRecords.length,
     '上报访客ID：' + (d.visitorId || '未知'),
     '',
     '明细：',
@@ -262,9 +308,9 @@ app.post('/api/login-logs', async (req, res) => {
       subject: String(subject).slice(0, 998),
       text: body
     });
-    logTask('login-logs', 'success', 'count=' + records.length + ' visitor=' + (d.visitorId || '?'));
-    /* 存入内存供 /api/login-logs/query 查询 */
-    records.forEach(function (r) {
+    logTask('login-logs', 'success', 'new=' + newRecords.length + ' dup=' + dupCount + ' visitor=' + (d.visitorId || '?'));
+    /* 只存新记录（去重后的） */
+    newRecords.forEach(function (r) {
       loginLogsStore.push({
         time: r.time || new Date().toLocaleString('zh-CN', { timeZone: TZ }),
         action: r.action || '',
@@ -283,7 +329,8 @@ app.post('/api/login-logs', async (req, res) => {
     if (loginLogsStore.length > LOGIN_LOGS_MAX) {
       loginLogsStore.splice(0, loginLogsStore.length - LOGIN_LOGS_MAX);
     }
-    res.json({ success: true, messageId: info.messageId, message: '登录记录已上报云端', stored: records.length });
+    saveLoginLogs();
+    res.json({ success: true, messageId: info.messageId, message: '登录记录已上报云端', stored: newRecords.length, duplicates: dupCount });
   } catch (err) {
     logTask('login-logs', 'error', err.message);
     res.status(500).json({ success: false, error: err.message });
