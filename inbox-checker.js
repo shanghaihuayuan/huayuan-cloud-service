@@ -3,6 +3,9 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 
+/* Track already-alerted messages to prevent repeat alerts every 30 min */
+const alertedKeys = new Set();
+
 async function checkInbox(config) {
   const { host, port, user, pass, alertTo, transporter } = config;
 
@@ -46,17 +49,26 @@ async function checkInbox(config) {
       const unread = messages.filter(m => !m.seen).length;
 
       // Only alert for unread messages from the last 24 hours, from company domains only
+      // Exclude: auto-senders, self-sent emails (system CC), already-alerted messages
       const now = new Date();
       const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       const autoSenders = ['formsubmit', 'noreply', 'no-reply', 'notification', 'mailer', 'postmaster', 'agent.qq.com'];
-      // Only care about company-related senders
       const companyDomains = ['shhy66.com', 'qtkj-tech.com'];
+      const userAddr = (user || '').toLowerCase();
       const recentHumanUnread = messages.filter(m => {
         if (m.seen) return false;
         if (m.date <= oneDayAgo) return false;
         if (autoSenders.some(s => m.fromAddr.toLowerCase().includes(s))) return false;
+        // Exclude self-sent emails (system emails CC'd to self)
+        if (m.fromAddr.toLowerCase() === userAddr) return false;
         // Only alert for company domain senders
         return companyDomains.some(d => m.fromAddr.toLowerCase().includes(d));
+      }).filter(m => {
+        // Dedup: skip already-alerted messages
+        const key = (m.subject || '') + '|' + m.dateStr;
+        if (alertedKeys.has(key)) return false;
+        alertedKeys.add(key);
+        return true;
       });
 
       if (recentHumanUnread.length > 0) {
